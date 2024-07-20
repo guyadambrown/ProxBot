@@ -4,7 +4,13 @@ const {Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, Permissions
 const client = new Client({intents: GatewayIntentBits.Guilds | GatewayIntentBits.GuildMessages | GatewayIntentBits.MessageContent});
 let proxmoxOnline = true;
 let statusMessage = false;
-let globalCommands = true;          
+let globalCommands = true;
+
+const proxmox = new proxmoxApi({
+    host: process.env.PROXMOX_HOST,
+    username: process.env.PROXMOX_USERNAME,
+    password: process.env.PROXMOX_PASSWORD
+});
 
 if (process.env.PROXMOX_HOST === undefined || process.env.PROXMOX_USER === undefined || process.env.PROXMOX_PASSWORD === undefined) {
     console.error('The "PROXMOX_USER", "PROXMOX_PASSWORD" and "PROXMOX_HOST" variables are not set  - Bot will not start.');
@@ -39,14 +45,38 @@ client.on('ready', (bot) => {
     client.user.setActivity('Monitoring proxmox');
 
     const proxinfo = new SlashCommandBuilder()
-    .setName('proxinfo')
-    .setDescription('Get information about the proxmox server');
+        .setName('proxinfo')
+        .setDescription('Get information about the proxmox server');
+
+    const VM = new SlashCommandBuilder()
+        .setName('vm')
+        .setDescription('Control the state of a virtual machine')
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('start')
+                .setDescription('Start a virtual machine')
+                .addStringOption(option => option.setName('vmid').setDescription('The ID of the virtual machine').setRequired(true))
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('stop')
+                .setDescription('Stop a virtual machine')
+                .addStringOption(option => option.setName('vmid').setDescription('The ID of the virtual machine').setRequired(true))
+        )
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('reboot')
+                .setDescription('Reboot a virtual machine')
+                .addStringOption(option => option.setName('vmid').setDescription('The ID of the virtual machine').setRequired(true))
+        );
 
     if (globalCommands) {
         client.application.commands.create(proxinfo);
+        client.application.commands.create(VM);
         console.log('Command registered globally!');
     } else {
         client.application.commands.create(proxinfo, process.env.TESTING_GUILD_ID);
+        client.application.commands.create(VM, process.env.TESTING_GUILD_ID);
         console.log('Command registered!');
     }
     
@@ -87,6 +117,47 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.editReply({embeds: [statusEmbed, vmEmbed], files: [proxmoxLogoFile, vmIconFile]});
         }
     }
+
+    if (commandName === 'vm') {
+        const subcommand = interaction.options.getSubcommand();
+        const vmid = interaction.options.getString('vmid');
+        
+        switch (subcommand) {
+            case 'start':
+                await interaction.reply('Starting the virtual machine...');
+                try {
+                    await vmPowerOn(vmid);
+                    await interaction.editReply('Virtual machine started!');
+                } catch (error) {
+                    await replyWithErrorMessage(interaction, 'Failed to start the virtual machine!');
+                    console.error(error);
+                }
+                break;
+            case 'stop':
+                await interaction.reply('Stopping the virtual machine...');
+                try {
+                    await vmPowerOff(vmid);
+                    await interaction.editReply('Virtual machine stopped!');
+                } catch (error) {
+                    await replyWithErrorMessage(interaction, 'Failed to stop the virtual machine!');
+                    console.error(error);
+                }
+                break;
+            case 'reboot':
+                await interaction.reply('Rebooting the virtual machine...');
+                try {
+                    await vmReboot(vmid);
+                    await interaction.editReply('Virtual machine rebooted!');
+                } catch (error) {
+                    await replyWithErrorMessage(interaction, 'Failed to reboot the virtual machine!');
+                    console.error(error);
+                }
+                break;
+        }
+    
+    }
+
+    
 });
 
 async function getProxmoxStatus() {
@@ -95,11 +166,6 @@ async function getProxmoxStatus() {
     }
     
     try {
-        const proxmox = new proxmoxApi({
-            host: process.env.PROXMOX_HOST,
-            username: process.env.PROXMOX_USERNAME,
-            password: process.env.PROXMOX_PASSWORD
-        });
     
         // Get the list of nodes
         const nodes = await proxmox.nodes.$get();
@@ -134,11 +200,6 @@ async function getProxmoxStatus() {
 }
 
 async function getProxmoxVMs() {
-    const proxmox = new proxmoxApi({
-        host: process.env.PROXMOX_HOST,
-        username: process.env.PROXMOX_USERNAME,
-        password: process.env.PROXMOX_PASSWORD
-    });
 
     // Get the list of nodes
     const nodes = await proxmox.nodes.$get();
@@ -150,11 +211,6 @@ async function getProxmoxVMs() {
 }
 
 async function getProxmoxLXC() {
-    const proxmox = new proxmoxApi({
-        host: process.env.PROXMOX_HOST,
-        username: process.env.PROXMOX_USERNAME,
-        password: process.env.PROXMOX_PASSWORD
-    });
 
     // Get the list of nodes
     const nodes = await proxmox.nodes.$get();
@@ -243,6 +299,21 @@ async function secondsToHumanReadable(secconds) {
     // Format the time string
     const timeFormatted = `${days} days, ${hours}:${minutes}:${seccond}`;
     return timeFormatted;
+}
+
+async function vmPowerOn(vmid) {
+    const nodes = await proxmox.nodes.$get();
+    await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.start.$post();
+}
+
+async function vmPowerOff(vmid) {
+    const nodes = await proxmox.nodes.$get();
+    await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.stop.$post();
+}
+
+async function vmReboot(vmid) {
+    const nodes = await proxmox.nodes.$get();
+    await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.reboot                 .$post();
 }
 
 client.login(process.env.TOKEN);
