@@ -67,103 +67,25 @@ client.on('interactionCreate', async (interaction) => {
         const proxmoxStatus = await getProxmoxStatus();
         const proxmoxVMs = await getProxmoxVMs();
         const proxmoxLXC = await getProxmoxLXC();
-
-
-
+        
         if (!proxmoxStatus) {
-            const errorEmbed = new EmbedBuilder()
-            .setTitle('Error')
-            .setColor(Colors.Red)
-            .setDescription('Could not connect to the Proxmox server!');
-            await interaction.editReply({embeds: [errorEmbed]});
+            await replyWithErrorMessage(interaction, 'Failed to get proxmox status!');
             return;
 
         } else {
-            // Convert memory usage to human readable format
-            const usedGB = (proxmoxStatus.memory.used / 1024 / 1024 / 1024).toFixed(2);
-            const totalGB = (proxmoxStatus.memory.total / 1024 / 1024 / 1024).toFixed(2);
-
-            // Convert swap usage to human readable format
-            const swapUsedGB = (proxmoxStatus.swap.used / 1024 / 1024 / 1024).toFixed(2);
-            const swapTotalGB = (proxmoxStatus.swap.total / 1024 / 1024 / 1024).toFixed(2);
-
-            // Convert uptime to human readable format
-            const uptime = proxmoxStatus.uptime;
-            const uptimeDays = Math.floor(uptime / 86400);
-            const uptimeHours = String(Math.floor(uptime % 86400 / 3600)).padStart(2, '0');
-            const uptimeMinutes = String(Math.floor(uptime % 3600 / 60)).padStart(2, '0');
-            const uptimeSeconds = String(Math.floor(uptime % 60)).padStart(2, '0');
-
-            const uptimeFormatted = `${uptimeDays} days, ${uptimeHours}:${uptimeMinutes}:${uptimeSeconds}`;
-
-            // Convert CPU usage to human readable format (decimal -> percentage)
-            const cpuUsageDecimal = proxmoxStatus.cpu;
-            const cpuUsagePercentage = cpuUsageDecimal * 100;
-
-            // Convert IO delay to human readable format.
-            const ioDelayDecimal = proxmoxStatus.wait;
-            const ioDelayPercentage = ioDelayDecimal * 100;
-
-            // Load the proxmox logo from file, and create an attachment.
+            // Load the proxmox and VM logo from file, and create an attachment.
             const proxmoxLogoFile = new AttachmentBuilder('./data/images/proxmoxLogo.png');
-
-            // Load the vm logo from file, and create an attachment.
             const vmIconFile = new AttachmentBuilder('./data/images/vmIcon.png');
 
+            // Create the status embed
+            const statusEmbed = await createStatusEmbed(proxmoxStatus);
 
-            const statusEmbed = new EmbedBuilder()
-            .setTitle(`Proxmox Status (${process.env.PROXMOX_HOST})`)
-            .setThumbnail('attachment://proxmoxLogo.png')
-            .setColor(Colors.Orange)
-            .addFields(
-                {name: 'Memory Usage', value: `${usedGB} / ${totalGB} GB`, inline: true},
-                {name: 'Swap Usage', value: `${swapUsedGB} / ${swapTotalGB} GB`, inline: true},
-                {name: 'Uptime', value: `${uptimeFormatted}`, inline: true},
-                {name: 'CPU Usage', value: `${cpuUsagePercentage.toFixed(2)}%`, inline: true},
-                {name: 'Load Average', value: `${proxmoxStatus.loadavg[0]}, ${proxmoxStatus.loadavg[1]}, ${proxmoxStatus.loadavg[2]}`, inline: true},
-                {name: 'IO Delay', value: `${ioDelayPercentage.toFixed(2)}%`, inline: true},
-                {name: 'Proxmox version', value: proxmoxStatus.pveversion},
-                {name: 'Kernel version', value: proxmoxStatus.kversion}
-            );
+            // Create the VM embed
+            const vmEmbed = createVMEmbed(proxmoxVMs, proxmoxLXC);
 
-            // Embed to show the list of virtual machines
-
-            const vmEmbed = new EmbedBuilder()
-            .setTitle('Virtual Machines')
-            .setColor(Colors.Orange)
-            .setThumbnail('attachment://vmIcon.png')
-
-            for (const vm of proxmoxVMs) {
-                if (vm.status === 'running') {
-                    vm.status = 'Running ✅';
-                    
-                } else {
-                    vm.status = 'Stopped ❌';
-                }
-
-                vmEmbed.addFields(
-                    {name: `${vm.name} (QEMU) (ID: ${vm.vmid})`, value: vm.status, inline: false},
-                );
-            }
-
-            for (const lxc of proxmoxLXC) {
-                if (lxc.status === 'running') {
-                    lxc.status = 'Running ✅';
-
-                } else {
-                    lxc.status = 'Stopped ❌';
-                }
-
-                vmEmbed.addFields(
-                    {name: `${lxc.name} (LXC) (ID: ${lxc.vmid})`, value: lxc.status, inline: false},
-                );
-            }
-            
+            // Send the embeds and attachments.
             await interaction.editReply({embeds: [statusEmbed, vmEmbed], files: [proxmoxLogoFile, vmIconFile]});
         }
-        
-        
-        
     }
 });
 
@@ -242,6 +164,86 @@ async function getProxmoxLXC() {
     const lxc = await proxmox.nodes.$(nodes[0].node).lxc.$get();
 
     return lxc;
+}
+
+async function replyWithErrorMessage(interaction, message) {
+    const errorEmbed = new EmbedBuilder()
+    .setTitle('Error')
+    .setColor(Colors.Red)
+    .setDescription(message);
+    await interaction.editReply({embeds: [errorEmbed]});
+}
+
+async function createStatusEmbed(proxmoxStatus) {
+
+    const {usedGB, totalGB} = await humanReadableMemoryGigabyte(proxmoxStatus.memory.used, proxmoxStatus.memory.total);
+    const {usedGB: swapUsedGB, totalGB: swapTotalGB} = await humanReadableMemoryGigabyte(proxmoxStatus.swap.used, proxmoxStatus.swap.total);
+    const uptimeFormatted = await secondsToHumanReadable(proxmoxStatus.uptime);
+
+    // Convert CPU usage to human readable format (decimal -> percentage)
+    const cpuUsagePercentage = (proxmoxStatus.cpu * 100).toFixed(2);
+
+    // Convert IO delay to human readable format.
+     const ioDelayPercentage = (proxmoxStatus.wait * 100).toFixed(2);
+
+    const statusEmbed = new EmbedBuilder()
+            .setTitle(`Proxmox Status (${process.env.PROXMOX_HOST})`)
+            .setColor(Colors.Orange)
+            .setThumbnail('attachment://proxmoxLogo.png')
+            .addFields(
+                {name: 'Memory Usage', value: `${usedGB}GB / ${totalGB}GB`, inline: true},
+                {name: 'Swap Usage', value: `${swapUsedGB}GB / ${swapTotalGB}GB`, inline: true},
+                {name: 'Uptime', value: `${uptimeFormatted}`, inline: true},
+                {name: 'CPU Usage', value: `${cpuUsagePercentage}%`, inline: true},
+                {name: 'Load Average', value: `${proxmoxStatus.loadavg[0]}, ${proxmoxStatus.loadavg[1]}, ${proxmoxStatus.loadavg[2]}`, inline: true},
+                {name: 'IO Delay', value: `${ioDelayPercentage}%`, inline: true},
+                {name: 'Proxmox version', value: proxmoxStatus.pveversion},
+                {name: 'Kernel version', value: proxmoxStatus.kversion}
+            );
+    return statusEmbed;
+
+}
+
+function createVMEmbed(proxmoxVMs, proxmoxLXC) {
+    const vmEmbed = new EmbedBuilder()
+            .setTitle('Virtual Machines')
+            .setColor(Colors.Orange)
+            .setThumbnail('attachment://vmIcon.png')
+
+            proxmoxVMs.forEach(vm => {
+                const status = vm.status === 'running' ? 'Running ✅' : 'Stopped ❌';
+                vmEmbed.addFields(
+                    {name: `${vm.name} (QEMU) (ID: ${vm.vmid})`, value: status, inline: false},
+                );
+            });
+
+            proxmoxLXC.forEach(lxc => {
+                const status = lxc.status === 'running' ? 'Running ✅' : 'Stopped ❌';
+                vmEmbed.addFields(
+                    {name: `${lxc.name} (LXC) (ID: ${lxc.vmid})`, value: status, inline: false},
+                );
+            });
+
+            
+            return vmEmbed;
+}
+
+async function humanReadableMemoryGigabyte(usedMem, totalMem) {
+    // Convert memory usage from bytes to gigabytes
+    const usedGB = (usedMem / 1024 / 1024 / 1024).toFixed(2);
+    const totalGB = (totalMem / 1024 / 1024 / 1024).toFixed(2);
+    return {usedGB, totalGB};
+}
+
+async function secondsToHumanReadable(secconds) {
+    // Convert seconds to a date string
+    const days = Math.floor(secconds / 86400);
+    const hours = String(Math.floor(secconds % 86400 / 3600)).padStart(2, '0');
+    const minutes = String(Math.floor(secconds % 3600 / 60)).padStart(2, '0');
+    const seccond = String(Math.floor(secconds % 60)).padStart(2, '0');
+    // Format the time string
+    const timeFormatted = `${days} days, ${hours}:${minutes}:${seccond}`;
+    return timeFormatted;
 }
 
 client.login(process.env.TOKEN);
