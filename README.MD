@@ -40,8 +40,7 @@ Once the bot is running and connected to your Discord server, you can use the fo
 - `/proxinfo`: Get the current status of the Proxmox host, shows running VMs and LXC containers.
 
 ## Planned features
-
-- Allow power controls for lxc containers.
+- Allow power controls for LXC containers.
 - Allow the downloading of a spice file to view the console. (maybe - Only works on local network)
 
 ## Contributing
