@@ -6,7 +6,8 @@ ProxBot is a Discord bot designed to connect to a Proxmox host and provide statu
 
 - Live status showing CPU and RAM usage.
 - DM Notifcations in case of an outage.
-- Customisable time between health checks
+- Customisable time between health checks.
+- Basic VM power controls.
 
 ## Installation
 
@@ -40,7 +41,7 @@ Once the bot is running and connected to your Discord server, you can use the fo
 
 ## Planned features
 
-- Allow changing the power state of VMs and LXCs.
+- Allow power controls for lxc containers.
 - Allow the downloading of a spice file to view the console. (maybe - Only works on local network)
 
 ## Contributing
