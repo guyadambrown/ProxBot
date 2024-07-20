@@ -12,9 +12,10 @@ ProxBot is a Discord bot designed to connect to a Proxmox host and provide statu
 ## Installation
 
 1. Clone this repository.
-2. Install the required dependencies by running `npm install`.
-3. Set up the necessary environment variables (see Configuration section).
-4. Start the bot by running `npm start`.
+2. Change directory into the repository
+3. Install the required dependencies by running `npm install`.
+4. Set up the necessary environment variables (see Configuration section).
+5. Start the bot by running `npm .`.
 
 ## Configuration
 
@@ -38,6 +39,8 @@ There are also some optional environment variables:
 Once the bot is running and connected to your Discord server, you can use the following commands:
 
 - `/proxinfo`: Get the current status of the Proxmox host, shows running VMs and LXC containers.
+
+- `/vm {start/stop/reboot} {VMID}`: Allows a user to control the power state of a given VM
 
 ## Planned features
 - Allow power controls for LXC containers.
