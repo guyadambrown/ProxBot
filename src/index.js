@@ -4,7 +4,7 @@ const {Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, Permissions
 const client = new Client({intents: GatewayIntentBits.Guilds | GatewayIntentBits.GuildMessages | GatewayIntentBits.MessageContent});
 let proxmoxOnline = true;
 let statusMessage = false;
-let globalCommands = true;
+let globalCommands = true;          
 
 if (process.env.PROXMOX_HOST === undefined || process.env.PROXMOX_USER === undefined || process.env.PROXMOX_PASSWORD === undefined) {
     console.error('The "PROXMOX_USER", "PROXMOX_PASSWORD" and "PROXMOX_HOST" variables are not set  - Bot will not start.');
@@ -123,10 +123,9 @@ async function getProxmoxStatus() {
         if (proxmoxOnline) {
             client.user.setActivity('Proxmox offline!');
             client.user.setStatus('dnd');
-            console.log(process.env.OWNER_ID);
             client.users.fetch(process.env.OWNER_ID).then(user => user.send('Proxmox server is offline!'));
             proxmoxOnline = false;
-        }
+        }   
         
         
         return null;
