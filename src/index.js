@@ -6,11 +6,7 @@ let proxmoxOnline = true;
 let statusMessage = false;
 let globalCommands = true;
 
-const proxmox = new proxmoxApi({
-    host: process.env.PROXMOX_HOST,
-    username: process.env.PROXMOX_USERNAME,
-    password: process.env.PROXMOX_PASSWORD
-});
+
 
 if (process.env.PROXMOX_HOST === undefined || process.env.PROXMOX_USER === undefined || process.env.PROXMOX_PASSWORD === undefined) {
     console.error('The "PROXMOX_USER", "PROXMOX_PASSWORD" and "PROXMOX_HOST" variables are not set  - Bot will not start.');
@@ -35,7 +31,11 @@ if (process.env.TESTING_GUILD_ID === undefined) {
     globalCommands = false;
 }
 
-
+const proxmox = new proxmoxApi({
+    host: process.env.PROXMOX_HOST,
+    username: process.env.PROXMOX_USERNAME,
+    password: process.env.PROXMOX_PASSWORD
+});
 
 client.on('ready', (bot) => {
    
@@ -44,9 +44,13 @@ client.on('ready', (bot) => {
     console.log(`[${new Date().toLocaleString()}] Logged in as ${bot.user.tag}`);
     client.user.setActivity('Monitoring proxmox');
 
-    const proxinfo = new SlashCommandBuilder()
-        .setName('proxinfo')
+    const hostInfo = new SlashCommandBuilder()
+        .setName('hostinfo')
         .setDescription('Get information about the proxmox server');
+
+    const vmInfo = new SlashCommandBuilder()
+        .setName('vminfo')
+        .setDescription('Get information about the virtual machines on the proxmox server');
 
     const VM = new SlashCommandBuilder()
         .setName('vm')
@@ -71,51 +75,50 @@ client.on('ready', (bot) => {
         );
 
     if (globalCommands) {
-        client.application.commands.create(proxinfo);
+        client.application.commands.create(hostInfo);
+        client.application.commands.create(vmInfo);
         client.application.commands.create(VM);
         console.log('Command registered globally!');
     } else {
-        client.application.commands.create(proxinfo, process.env.TESTING_GUILD_ID);
+        client.application.commands.create(hostInfo, process.env.TESTING_GUILD_ID);
+        client.application.commands.create(vmInfo, process.env.TESTING_GUILD_ID);
         client.application.commands.create(VM, process.env.TESTING_GUILD_ID);
         console.log('Command registered!');
     }
     
 });
 
-// Set an interval to check the proxmox server status every 5 seconds
-setInterval(() => {
-    getProxmoxStatus()
-}, process.env.TIME_BETWEEN_CHECKS || 5000);
+
+// Command handler
 
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isCommand()) return;
 
     const { commandName } = interaction;
 
-    if (commandName === 'proxinfo') {
+    if (commandName === 'hostinfo') {
         await interaction.reply('Probing the proxmox server...');
         const proxmoxStatus = await getProxmoxStatus();
+        
+        // Load the proxmox and VM logo from file, and create an attachment.
+        const proxmoxLogoFile = new AttachmentBuilder('./data/images/proxmoxLogo.png');
+
+        // Create the status embed
+        const statusEmbed = await createStatusEmbed(proxmoxStatus);
+
+        // Send the embeds and attachments.
+        await interaction.editReply({embeds: [statusEmbed], files: [proxmoxLogoFile]});
+        
+    }
+
+    if (commandName === 'vminfo') {
+        await interaction.reply('Getting virtual machine information...');
         const proxmoxVMs = await getProxmoxVMs();
         const proxmoxLXC = await getProxmoxLXC();
-        
-        if (!proxmoxStatus) {
-            await replyWithErrorMessage(interaction, 'Failed to get proxmox status!');
-            return;
-
-        } else {
-            // Load the proxmox and VM logo from file, and create an attachment.
-            const proxmoxLogoFile = new AttachmentBuilder('./data/images/proxmoxLogo.png');
-            const vmIconFile = new AttachmentBuilder('./data/images/vmIcon.png');
-
-            // Create the status embed
-            const statusEmbed = await createStatusEmbed(proxmoxStatus);
-
-            // Create the VM embed
-            const vmEmbed = createVMEmbed(proxmoxVMs, proxmoxLXC);
-
-            // Send the embeds and attachments.
-            await interaction.editReply({embeds: [statusEmbed, vmEmbed], files: [proxmoxLogoFile, vmIconFile]});
-        }
+        // Create the VM embed
+        const vmEmbed = createVMEmbed(proxmoxVMs, proxmoxLXC);
+        const vmIconFile = new AttachmentBuilder('./data/images/vmIcon.png');
+        await interaction.editReply({embeds: [vmEmbed], files: [vmIconFile]});
     }
 
     if (commandName === 'vm') {
@@ -129,7 +132,7 @@ client.on('interactionCreate', async (interaction) => {
                     await vmPowerOn(vmid);
                     await interaction.editReply('Virtual machine started!');
                 } catch (error) {
-                    await replyWithErrorMessage(interaction, 'Failed to start the virtual machine!');
+                    await replyWithErrorMessage(interaction, error.message);
                     console.error(error);
                 }
                 break;
@@ -139,7 +142,7 @@ client.on('interactionCreate', async (interaction) => {
                     await vmPowerOff(vmid);
                     await interaction.editReply('Virtual machine stopped!');
                 } catch (error) {
-                    await replyWithErrorMessage(interaction, 'Failed to stop the virtual machine!');
+                    await replyWithErrorMessage(interaction, error.message);
                     console.error(error);
                 }
                 break;
@@ -149,7 +152,7 @@ client.on('interactionCreate', async (interaction) => {
                     await vmReboot(vmid);
                     await interaction.editReply('Virtual machine rebooted!');
                 } catch (error) {
-                    await replyWithErrorMessage(interaction, 'Failed to reboot the virtual machine!');
+                    await replyWithErrorMessage(interaction, error.message);
                     console.error(error);
                 }
                 break;
@@ -159,6 +162,8 @@ client.on('interactionCreate', async (interaction) => {
 
     
 });
+
+// Proxmox status functions
 
 async function getProxmoxStatus() {
     if (!client.isReady()) {
@@ -199,36 +204,6 @@ async function getProxmoxStatus() {
 
 }
 
-async function getProxmoxVMs() {
-
-    // Get the list of nodes
-    const nodes = await proxmox.nodes.$get();
-
-    // Get vms from the first node
-    const vms = await proxmox.nodes.$(nodes[0].node).qemu.$get();
-
-    return vms;
-}
-
-async function getProxmoxLXC() {
-
-    // Get the list of nodes
-    const nodes = await proxmox.nodes.$get();
-
-    // Get vms from the first node
-    const lxc = await proxmox.nodes.$(nodes[0].node).lxc.$get();
-
-    return lxc;
-}
-
-async function replyWithErrorMessage(interaction, message) {
-    const errorEmbed = new EmbedBuilder()
-    .setTitle('Error')
-    .setColor(Colors.Red)
-    .setDescription(message);
-    await interaction.editReply({embeds: [errorEmbed]});
-}
-
 async function createStatusEmbed(proxmoxStatus) {
 
     const {usedGB, totalGB} = await humanReadableMemoryGigabyte(proxmoxStatus.memory.used, proxmoxStatus.memory.total);
@@ -259,6 +234,47 @@ async function createStatusEmbed(proxmoxStatus) {
 
 }
 
+// Virtual Machine status functions
+
+async function getProxmoxVMs() {
+
+    // Get the list of nodes
+    const nodes = await proxmox.nodes.$get();
+
+    // Get vms from the first node
+    const vms = await proxmox.nodes.$(nodes[0].node).qemu.$get();
+
+    return vms;
+}
+
+async function getProxmoxLXC() {
+
+    // Get the list of nodes
+    const nodes = await proxmox.nodes.$get();
+
+    // Get vms from the first node
+    const lxc = await proxmox.nodes.$(nodes[0].node).lxc.$get();
+
+    return lxc;
+}
+
+async function getProxmoxVMStatus(vmid) {
+    const nodes = await proxmox.nodes.$get();
+    try {
+        const vmStatus = await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.current.$get();
+        return vmStatus;
+    } catch (error) {
+        return null;
+    }
+    
+}
+
+async function getProxmoxLXCStatus(vmid) {
+    const nodes = await proxmox.nodes.$get();
+    const lxcStatus = await proxmox.nodes.$(nodes[0].node).lxc.$(vmid).status.current.$get();
+    return lxcStatus;
+}
+
 function createVMEmbed(proxmoxVMs, proxmoxLXC) {
     const vmEmbed = new EmbedBuilder()
             .setTitle('Virtual Machines')
@@ -283,6 +299,41 @@ function createVMEmbed(proxmoxVMs, proxmoxLXC) {
             return vmEmbed;
 }
 
+// Virtual Machine control functions
+async function vmPowerOn(vmid) {
+    const nodes = await proxmox.nodes.$get();
+    if (await getProxmoxVMStatus(vmid) === null) {
+        throw new Error('Virtual machine not found!');
+    }
+    await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.start.$post();
+}
+
+async function vmPowerOff(vmid) {
+    const nodes = await proxmox.nodes.$get();
+    if (await getProxmoxVMStatus(vmid) === null) {
+        throw new Error('Virtual machine not found!');
+    }
+    await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.stop.$post();
+}
+
+async function vmReboot(vmid) {
+    const nodes = await proxmox.nodes.$get();
+    if (await getProxmoxVMStatus(vmid) === null) {
+        throw new Error('Virtual machine not found!');
+    }
+    await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.reboot.$post();
+}
+
+// Utility functions
+
+async function replyWithErrorMessage(interaction, message) {
+    const errorEmbed = new EmbedBuilder()
+    .setTitle('Error')
+    .setColor(Colors.Red)
+    .setDescription(message);
+    await interaction.editReply({embeds: [errorEmbed]});
+}
+
 async function humanReadableMemoryGigabyte(usedMem, totalMem) {
     // Convert memory usage from bytes to gigabytes
     const usedGB = (usedMem / 1024 / 1024 / 1024).toFixed(2);
@@ -301,21 +352,13 @@ async function secondsToHumanReadable(secconds) {
     return timeFormatted;
 }
 
-async function vmPowerOn(vmid) {
-    const nodes = await proxmox.nodes.$get();
-    await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.start.$post();
-}
+// Timers
 
-async function vmPowerOff(vmid) {
-    const nodes = await proxmox.nodes.$get();
-    await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.stop.$post();
-}
+setInterval(() => {
+    getProxmoxStatus()
+}, process.env.TIME_BETWEEN_CHECKS || 5000);
 
-async function vmReboot(vmid) {
-    const nodes = await proxmox.nodes.$get();
-    await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.reboot                 .$post();
-}
-
+// Login to the bot using the token from the .env file
 client.login(process.env.TOKEN);
 
 
