@@ -2,31 +2,32 @@ require('dotenv').config();
 const {proxmoxApi} = require('proxmox-api');
 const {Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, Permissions, SlashCommandBuilder, Colors, AttachmentBuilder} = require('discord.js');
 const client = new Client({intents: GatewayIntentBits.Guilds | GatewayIntentBits.GuildMessages | GatewayIntentBits.MessageContent});
+const fs = require('fs');
 let proxmoxOnline = true;
-let statusMessage = false;
 let globalCommands = true;
+let statusMessage = false;
 
 
 
 if (process.env.PROXMOX_HOST === undefined || process.env.PROXMOX_USER === undefined || process.env.PROXMOX_PASSWORD === undefined) {
-    console.error('The "PROXMOX_USER", "PROXMOX_PASSWORD" and "PROXMOX_HOST" variables are not set  - Bot will not start.');
+    logMessage('The "PROXMOX_USER", "PROXMOX_PASSWORD" and "PROXMOX_HOST" variables are not set  - Bot will not start.');
     process.exit(1);
 }
 
 if (process.env.TOKEN === undefined) {
-    console.error('The "TOKEN" environment variable is not set! - Bot will not start.');
+    logMessage('The "TOKEN" environment variable is not set! - Bot will not start.');
     process.exit(1);
 }
 
 if (process.env.OWNER_ID === undefined) {
-    console.error('The "OWNER_ID" environment variable is not set! - Messages will not be sent to the owner.');
+    logMessage('The "OWNER_ID" environment variable is not set! - Messages will not be sent to the owner.');
 } else {
     statusMessage = true;
-    console.log('Status messaging enabled!');
+    logMessage('Status messaging enabled!');
 }
 
 if (process.env.TESTING_GUILD_ID === undefined) {
-    console.error('The "TESTING_GUILD_ID" environment variable is not set! - Command will be created in all guilds.');
+    logMessage('The "TESTING_GUILD_ID" environment variable is not set! - Command will be created in all guilds.');
 }else {
     globalCommands = false;
 }
@@ -41,7 +42,7 @@ client.on('ready', (bot) => {
    
 
     // Send a message to the console wiht the current date/time and the bot's username
-    console.log(`[${new Date().toLocaleString()}] Logged in as ${bot.user.tag}`);
+    logMessage(`Logged in as ${bot.user.tag}`);
     client.user.setActivity('Monitoring proxmox');
 
     const hostInfo = new SlashCommandBuilder()
@@ -78,12 +79,12 @@ client.on('ready', (bot) => {
         client.application.commands.create(hostInfo);
         client.application.commands.create(vmInfo);
         client.application.commands.create(VM);
-        console.log('Command registered globally!');
+        logMessage('Command registered globally!');
     } else {
         client.application.commands.create(hostInfo, process.env.TESTING_GUILD_ID);
         client.application.commands.create(vmInfo, process.env.TESTING_GUILD_ID);
         client.application.commands.create(VM, process.env.TESTING_GUILD_ID);
-        console.log('Command registered!');
+        logMessage('Command registered!');
     }
     
 });
@@ -96,7 +97,10 @@ client.on('interactionCreate', async (interaction) => {
 
     const { commandName } = interaction;
 
+    
+
     if (commandName === 'hostinfo') {
+        logMessage(`@${interaction.user.tag} ran /${commandName} in the "${interaction.guild.name}" guild.`);
         await interaction.reply('Probing the proxmox server...');
         const proxmoxStatus = await getProxmoxStatus();
         
@@ -112,6 +116,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (commandName === 'vminfo') {
+        logMessage(`@${interaction.user.tag} ran /${commandName} in the "${interaction.guild.name}" guild.`);
         await interaction.reply('Getting virtual machine information...');
         const proxmoxVMs = await getProxmoxVMs();
         const proxmoxLXC = await getProxmoxLXC();
@@ -124,6 +129,8 @@ client.on('interactionCreate', async (interaction) => {
     if (commandName === 'vm') {
         const subcommand = interaction.options.getSubcommand();
         const vmid = interaction.options.getString('vmid');
+        logMessage(`@${interaction.user.tag} ran "/${commandName} ${subcommand} ${vmid}" in the "${interaction.guild.name}" guild.`);
+        
         
         switch (subcommand) {
             case 'start':
@@ -133,7 +140,7 @@ client.on('interactionCreate', async (interaction) => {
                     await interaction.editReply('Virtual machine started!');
                 } catch (error) {
                     await replyWithErrorMessage(interaction, error.message);
-                    console.error(error);
+                    
                 }
                 break;
             case 'stop':
@@ -143,7 +150,7 @@ client.on('interactionCreate', async (interaction) => {
                     await interaction.editReply('Virtual machine stopped!');
                 } catch (error) {
                     await replyWithErrorMessage(interaction, error.message);
-                    console.error(error);
+                    
                 }
                 break;
             case 'reboot':
@@ -153,7 +160,6 @@ client.on('interactionCreate', async (interaction) => {
                     await interaction.editReply('Virtual machine rebooted!');
                 } catch (error) {
                     await replyWithErrorMessage(interaction, error.message);
-                    console.error(error);
                 }
                 break;
         }
@@ -190,7 +196,7 @@ async function getProxmoxStatus() {
         return nodeStatus;
 
     } catch (error) {
-        console.error(error);
+        logMessage(error);
         if (proxmoxOnline) {
             client.user.setActivity('Proxmox offline!');
             client.user.setStatus('dnd');
@@ -303,7 +309,7 @@ function createVMEmbed(proxmoxVMs, proxmoxLXC) {
 async function vmPowerOn(vmid) {
     const nodes = await proxmox.nodes.$get();
     if (await getProxmoxVMStatus(vmid) === null) {
-        throw new Error('Virtual machine not found!');
+        throw new Error(`Virtual machine (VMID: ${vmid}) not found!`);
     }
     await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.start.$post();
 }
@@ -311,7 +317,7 @@ async function vmPowerOn(vmid) {
 async function vmPowerOff(vmid) {
     const nodes = await proxmox.nodes.$get();
     if (await getProxmoxVMStatus(vmid) === null) {
-        throw new Error('Virtual machine not found!');
+        throw new Error(`Virtual machine (VMID: ${vmid}) not found!`);
     }
     await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.stop.$post();
 }
@@ -319,7 +325,7 @@ async function vmPowerOff(vmid) {
 async function vmReboot(vmid) {
     const nodes = await proxmox.nodes.$get();
     if (await getProxmoxVMStatus(vmid) === null) {
-        throw new Error('Virtual machine not found!');
+        throw new Error(`Virtual machine (VMID: ${vmid}) not found!`);
     }
     await proxmox.nodes.$(nodes[0].node).qemu.$(vmid).status.reboot.$post();
 }
@@ -332,6 +338,7 @@ async function replyWithErrorMessage(interaction, message) {
     .setColor(Colors.Red)
     .setDescription(message);
     await interaction.editReply({embeds: [errorEmbed]});
+    logMessage(`Error: ${message}`);
 }
 
 async function humanReadableMemoryGigabyte(usedMem, totalMem) {
@@ -350,6 +357,18 @@ async function secondsToHumanReadable(secconds) {
     // Format the time string
     const timeFormatted = `${days} days, ${hours}:${minutes}:${seccond}`;
     return timeFormatted;
+}
+
+function logMessage(message) {
+    // Get the current date and time
+    let date = new Date().toLocaleString();
+
+    // Look for a log file and write the message to it, if not, create a new one.
+    let formattedMessage = `[${date}] ${message}`;
+
+    fs.appendFileSync(`./data/logs/botlog.log`, formattedMessage + '\n');
+
+    console.log(formattedMessage);
 }
 
 // Timers

@@ -8,6 +8,7 @@ ProxBot is a Discord bot designed to connect to a Proxmox host and provide statu
 - DM Notifcations in case of an outage.
 - Customisable time between health checks.
 - Basic VM power controls.
+- Command and error logging with timestamps to console and file.
 
 ## Installation
 
